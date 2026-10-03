@@ -80,6 +80,14 @@ Example:
 WINEPREFIX="$HOME/.wine-hptuners" bash scripts/run-scanner.sh
 ```
 
+## Desktop shortcuts
+
+From a desktop session, run `bash scripts/install-desktop-shortcuts.sh`.
+The shortcuts open a terminal for the sudo prompt and keep it open after the
+launcher exits, so early errors remain visible. Close one HP Tuners session
+before starting another. If trust cannot be set automatically, right-click each
+shortcut and choose **Allow Launching**.
+
 ## Verify in stages
 
 1. With only USB connected, open **Help → VCM Suite Information** and request information with the blue “i” button. Confirm interface identity, firmware, and credits. “No vehicle power detected” is expected without vehicle power.
@@ -90,7 +98,7 @@ WINEPREFIX="$HOME/.wine-hptuners" bash scripts/run-scanner.sh
 
 - **Not Found:** confirm the device appears in `lsusb` as `0403:6015`, and its serial string starts with `MPVI`. The launcher requires that identity before changing a driver binding.
 - **Driver still held:** close all Wine/VM sessions and unplug/reconnect the MPVI2 USB cable. Wine may retain a USB claim briefly after the application exits.
-- **Bridge already installed:** finish the previous test and allow its cleanup to complete. If it was interrupted, restore its saved original bridge before relaunching.
+- **Bridge already installed:** finish the previous test and allow its cleanup to complete. If it was interrupted, close all Wine/VM applications, then run `bash scripts/recover-bridge.sh /path/to/session.log` with that interrupted session's log. Recovery takes the session lock and verifies the installed patch and original backup hash before restoring. Reconnect USB afterward. This does not recover sessions that used another launcher or state directory.
 - **Abrupt terminal termination or power loss:** automatic cleanup cannot be guaranteed. Each session saves the original library, its SHA256, and backup path in the session log. Restore that backup to the configured Wine library path using sudo; if there was no original library, remove the temporary bridge. Restore its ownership/mode to the distribution's expected values and reconnect USB.
 - **Different installation paths:** adjust `WINEPREFIX` or `HPT_FTDI_LIBRARY`; the default library layout is distribution-specific.
 
@@ -102,5 +110,8 @@ Diagnostic logs may contain device identifiers. Review them before posting publi
 - `scripts/build.sh`: fetch, patch, and build.
 - `scripts/run-scanner.sh`: guarded temporary bridge/USB setup, launch, and cleanup.
 - `scripts/run-editor.sh`: Editor entry point using the same setup.
+- `scripts/run-desktop.sh`: terminal wrapper that keeps errors visible.
+- `scripts/install-desktop-shortcuts.sh`: creates executable, trusted shortcuts.
+- `scripts/recover-bridge.sh`: verifies and restores an interrupted session's backup.
 
 The application, proprietary driver binaries, calibration files, device identifiers, and diagnostic logs are excluded from this repository.

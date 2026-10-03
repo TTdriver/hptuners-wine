@@ -88,13 +88,13 @@ task_cleanup() {
 trap task_cleanup EXIT
 printf 'Starting HP Tuners %s. Keep this terminal open until it closes.\n' "$task_name"
 sudo -v
+printf 'Original bridge SHA256: %s\nBackup: %s\nOwner: %s\nMode: %s\n' "$task_original_hash" "$task_backup" "${task_owner:-none}" "${task_mode:-none}" >"$task_log"
 task_swapped=1
 sudo install -m 0644 "$task_patch" "$task_installed"
 if [[ $task_driver == ftdi_sio ]]; then
   printf '%s' "$task_interface" | sudo tee /sys/bus/usb/drivers/ftdi_sio/unbind >/dev/null
   task_detached=1
 fi
-printf 'Original bridge SHA256: %s\nBackup: %s\n' "$task_original_hash" "$task_backup" >"$task_log"
 set +e
 FTDID=0403:6015 WINEDLLOVERRIDES=ftd2xx=b WINEPREFIX="$task_prefix" \
   WINEDEBUG=err+all LIBUSB_DEBUG=0 wine "$task_app" >>"$task_log" 2>&1
