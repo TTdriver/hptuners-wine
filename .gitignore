@@ -1,0 +1,12 @@
+/build/
+*.log
+*.dat
+*.hpt
+*.hpl
+*.bin
+*.dll
+*.so
+*.a
+*.o
+*.tgz
+*.zip

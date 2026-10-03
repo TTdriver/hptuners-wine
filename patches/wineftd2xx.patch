@@ -1,0 +1,174 @@
+--- a/ftd2xx.c
++++ b/ftd2xx.c
+@@ -6,6 +6,7 @@
+ */
+ 
+ #include <stdlib.h>
++#include <stdio.h>
+ 
+ #undef _WIN32
+ 
+@@ -17,6 +18,50 @@
+ 
+ //a list of FTD product ids to access (in hexidecimal)
+ #define FTDprodVar "FTDID"
++
++/* Translate receive notifications to Wine events. Linux D2XX event objects
++ * cannot accept Windows HANDLEs. This experimental adapter supports RX only. */
++typedef struct {
++  FT_HANDLE device;
++  HANDLE event, thread;
++  volatile LONG stop;
++} wine_rx_notification;
++static wine_rx_notification notifications[16];
++static SRWLOCK notification_lock = SRWLOCK_INIT;
++
++static DWORD WINAPI rx_notify_thread(LPVOID argument)
++{
++  wine_rx_notification *entry = argument;
++  while (!InterlockedCompareExchange(&entry->stop, 0, 0)) {
++    DWORD available = 0;
++    FT_STATUS status = xFT_GetQueueStatus(entry->device, &available);
++    if (status != FT_OK) break;
++    if (available && !SetEvent(entry->event)) break;
++    Sleep(10);
++  }
++  return 0;
++}
++
++/* Called under the exclusive notification lock, before closing the device. */
++static void stop_notification(wine_rx_notification *entry)
++{
++  InterlockedExchange(&entry->stop, 1);
++  WaitForSingleObject(entry->thread, INFINITE);
++  CloseHandle(entry->thread);
++  entry->thread = NULL;
++  entry->device = NULL;
++}
++
++static void remove_notification(FT_HANDLE device)
++{
++  unsigned i;
++  AcquireSRWLockExclusive(&notification_lock);
++  for (i = 0; i < 16; ++i)
++    if (notifications[i].thread && notifications[i].device == device)
++      stop_notification(&notifications[i]);
++  ReleaseSRWLockExclusive(&notification_lock);
++}
++
+ 
+ 
+ BOOL WINAPI DllMain(
+@@ -27,6 +72,7 @@
+ Trace("reason=%d\n", fdwReason);
+   switch(fdwReason) {
+     case DLL_PROCESS_ATTACH: {
++      fprintf(stderr, "HPT experimental event bridge loaded\n");
+       char *cursor = getenv(FTDprodVar);
+       if (cursor) {
+         char *end;
+@@ -191,6 +237,7 @@
+ FT_STATUS WINAPI FT_Close(FT_HANDLE ftHandle)
+ {
+ Trace("\n");
++  remove_notification(ftHandle);
+   return xFT_Close(ftHandle);
+ }
+ 
+@@ -275,22 +322,35 @@
+ }
+ 
+ 
+-FT_HANDLE FT_W32_CreateFile(PVOID pvArg1, DWORD dwAccess, DWORD dwShareMode,
++FT_HANDLE WINAPI FT_W32_CreateFile(PVOID pvArg1, DWORD dwAccess, DWORD dwShareMode,
+                                 LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+                                 DWORD dwCreate, DWORD dwAttrsAndFlags,
+                                 HANDLE hTemplate)
+ {
+ Trace("\n");
+-  return xFT_W32_CreateFile(pvArg1, dwAccess, dwShareMode,
++
++fprintf(stderr,
++        "FT_W32_CreateFile entering: pvArg1=%p access=0x%08lx create=0x%08lx flags=0x%08lx\n",
++        pvArg1,
++        (unsigned long)dwAccess,
++        (unsigned long)dwCreate,
++        (unsigned long)dwAttrsAndFlags);
++
++FT_HANDLE h = xFT_W32_CreateFile(pvArg1, dwAccess, dwShareMode,
+                                 lpSecurityAttributes,
+                                 dwCreate, dwAttrsAndFlags,
+                                 hTemplate);
++
++fprintf(stderr, "FT_W32_CreateFile returned handle=%p\n", h);
++
++return h;
+ }
+ 
+ 
+ BOOL WINAPI FT_W32_CloseHandle(FT_HANDLE ftHandle)
+ {
+ Trace("\n");
++  remove_notification(ftHandle);
+   return xFT_W32_CloseHandle(ftHandle);
+ }
+ 
+@@ -531,7 +591,37 @@
+                                          DWORD dwEventMask, PVOID pvArg)
+ {
+ Trace("\n");
+-  return xFT_SetEventNotification(ftHandle, dwEventMask, pvArg);
++
++  unsigned i;
++  wine_rx_notification *entry = NULL;
++  if (dwEventMask & ~FT_EVENT_RXCHAR) return FT_NOT_SUPPORTED;
++  if (dwEventMask && !pvArg) return FT_INVALID_PARAMETER;
++  AcquireSRWLockExclusive(&notification_lock);
++  for (i = 0; i < 16; ++i)
++    if (notifications[i].thread && notifications[i].device == ftHandle)
++      stop_notification(&notifications[i]);
++  if (!dwEventMask) {
++    ReleaseSRWLockExclusive(&notification_lock);
++    return FT_OK;
++  }
++  for (i = 0; i < 16; ++i)
++    if (!notifications[i].thread) { entry = &notifications[i]; break; }
++  if (!entry) {
++    ReleaseSRWLockExclusive(&notification_lock);
++    return FT_INSUFFICIENT_RESOURCES;
++  }
++  entry->device = ftHandle;
++  entry->event = (HANDLE)pvArg;
++  entry->stop = 0;
++  entry->thread = CreateThread(NULL, 0, rx_notify_thread, entry, 0, NULL);
++  if (!entry->thread) {
++    entry->device = NULL;
++    ReleaseSRWLockExclusive(&notification_lock);
++    return FT_INSUFFICIENT_RESOURCES;
++  }
++  fprintf(stderr, "Wine FTDI RX event adapter active\n");
++  ReleaseSRWLockExclusive(&notification_lock);
++  return FT_OK;
+ }
+ 
+ 
+@@ -542,7 +632,7 @@
+   return xFT_SetChars(ftHandle, uEventCh, uEventChEn, uErrorCh, uErrorChEn);
+ }
+ 
+-FT_STATUS FT_GetDriverVersion (FT_HANDLE ftHandle, LPDWORD lpdwDriverVersion)
++FT_STATUS WINAPI FT_GetDriverVersion (FT_HANDLE ftHandle, LPDWORD lpdwDriverVersion)
+ {
+ Trace("\n");
+   return xFT_GetDriverVersion(ftHandle, lpdwDriverVersion);
+--- a/Makefile
++++ b/Makefile
+@@ -3,7 +3,7 @@
+ CFLAGS = -Os -Wall
+ LIBS=libxftd2xx.a -ldl -lrt -lpthread
+ 
+-VER=1.4.34
++VER=1.4.36
+ 
+ RELEASE=wineftd2xx${VER}
+ 
