@@ -115,3 +115,9 @@ Diagnostic logs may contain device identifiers. Review them before posting publi
 - `scripts/recover-bridge.sh`: verifies and restores an interrupted session's backup.
 
 The application, proprietary driver binaries, calibration files, device identifiers, and diagnostic logs are excluded from this repository.
+
+## Give Thanks
+
+If you’d like to say thanks by buying me a drink or helping cover AI tokens, it’s appreciated.
+
+[Give Thanks](https://thanks.kerchnerlabs.com)
